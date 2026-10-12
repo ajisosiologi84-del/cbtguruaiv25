@@ -1551,11 +1551,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       showAlert('Tidak ada butir soal di Bank Soal untuk dicadangkan ke Supabase.');
       return;
     }
+
+    const isTeacher = adminRole === 'teacher';
     const currentKg = loggedInTeacher?.kodeGuru || (selectedGuruFilter !== 'ALL' ? selectedGuruFilter : (config.kodeGuru || 'GURU01'));
-    const currentMapel = mapelInput || config.mapel || 'Sosiologi';
+    const currentNama = loggedInTeacher?.nama || 'Guru Pengampu';
+    const currentMapel = (isTeacher ? loggedInTeacher?.mapel : undefined) || mapelInput || config.mapel || 'Sosiologi';
+
+    let questionsToBackup = config.questions;
+    if (isTeacher) {
+      const tKg = currentKg.trim().toUpperCase();
+      const tMapel = currentMapel.trim().toLowerCase();
+      questionsToBackup = config.questions.filter((q) => {
+        const qKg = (q.kodeGuru || '').trim().toUpperCase();
+        const qMapel = (q.mapel || '').trim().toLowerCase();
+        const matchKg = !qKg || qKg === tKg;
+        const matchMapel = !qMapel || qMapel === tMapel;
+        return matchKg && matchMapel;
+      });
+
+      if (questionsToBackup.length === 0) {
+        showAlert(`Tidak ada butir soal untuk Guru ${currentNama} (${currentMapel}) di Bank Soal untuk dicadangkan ke Cloud.`);
+        return;
+      }
+    }
+
     setIsQuickBackingUpToSupabase(true);
     try {
-      const result = await backupQuestionsToSupabase(config.questions, currentKg, currentMapel);
+      const result = await backupQuestionsToSupabase(
+        questionsToBackup,
+        currentKg,
+        currentMapel,
+        isTeacher ? currentNama : undefined,
+        isTeacher
+          ? {
+              isTeacher: true,
+              kodeGuru: currentKg,
+              nama: currentNama,
+              mapel: currentMapel,
+            }
+          : undefined
+      );
       setIsQuickBackingUpToSupabase(false);
       showAlert(result.message);
     } catch (err: any) {
@@ -10882,10 +10917,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         admins={adminsList}
         questions={config.questions}
         defaultKodeGuru={loggedInTeacher?.kodeGuru || (selectedGuruFilter !== 'ALL' ? selectedGuruFilter : (config.kodeGuru || 'GURU01'))}
-        defaultMapel={mapelInput || config.mapel || 'Sosiologi'}
+        defaultMapel={loggedInTeacher?.mapel || mapelInput || config.mapel || 'Sosiologi'}
         mapelList={mapelList}
         initialTab={supabaseModalInitialTab}
         role={adminRole}
+        loggedInTeacher={loggedInTeacher}
         showAlert={showAlert}
         onSaveSupabaseConfig={(url, key) => {
           onSaveConfig({
@@ -10914,7 +10950,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         onRestoreQuestions={(restoredQuestions, mode) => {
           let newQuestions: Question[] = [];
           if (mode === 'replace') {
-            newQuestions = restoredQuestions;
+            if (adminRole === 'teacher' && loggedInTeacher) {
+              const tKg = (loggedInTeacher.kodeGuru || '').toUpperCase();
+              const tMapel = (loggedInTeacher.mapel || '').trim().toLowerCase();
+              // Preserve questions belonging to other teachers or other subjects
+              const otherQuestions = config.questions.filter((q) => {
+                const qKg = (q.kodeGuru || '').toUpperCase();
+                const qMapel = (q.mapel || '').trim().toLowerCase();
+                return qKg !== tKg || (tMapel && qMapel !== tMapel);
+              });
+              newQuestions = [...otherQuestions, ...restoredQuestions].sort((a, b) => Number(a.id) - Number(b.id));
+            } else {
+              newQuestions = restoredQuestions;
+            }
           } else {
             const existingMap = new Map<number, Question>();
             config.questions.forEach((q) => existingMap.set(Number(q.id), q));

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Database,
@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Layers,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 import { StudentUser, TeacherUser, AdminUser, Question } from '../types';
 import { isSupabaseConfigured, getSupabaseCredentials, setRuntimeSupabaseCredentials } from '../lib/supabase';
@@ -46,6 +47,7 @@ export interface SupabaseBackupModalProps {
   mapelList?: string[];
   initialTab?: 'questions' | 'sync' | 'config' | 'sql';
   role?: 'admin' | 'teacher';
+  loggedInTeacher?: TeacherUser | null;
   onRestoreUsers: (data: RestoredMasterUsers) => void;
   onRestoreQuestions?: (questions: Question[], mode: 'merge' | 'replace') => void;
   showAlert?: (msg: string) => void;
@@ -64,11 +66,32 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
   mapelList = [],
   initialTab = 'questions',
   role = 'admin',
+  loggedInTeacher = null,
   onRestoreUsers,
   onRestoreQuestions,
   showAlert = alert,
   onSaveSupabaseConfig,
 }) => {
+  const isTeacher = role === 'teacher';
+  const teacherProfile = loggedInTeacher || (isTeacher ? teachers.find((t) => (t.kodeGuru && t.kodeGuru === defaultKodeGuru) || t.nip === defaultKodeGuru) : null);
+  const activeTeacherKg = loggedInTeacher?.kodeGuru || teacherProfile?.kodeGuru || defaultKodeGuru || 'GURU01';
+  const activeTeacherNama = loggedInTeacher?.nama || teacherProfile?.nama || 'Guru Pengampu';
+  const activeTeacherMapel = loggedInTeacher?.mapel || teacherProfile?.mapel || defaultMapel || 'Sosiologi';
+
+  // Filter local questions strictly matching teacher and mapel
+  const teacherMatchingQuestions = useMemo(() => {
+    if (!isTeacher) return questions;
+    const tKg = activeTeacherKg.trim().toUpperCase();
+    const tMapel = activeTeacherMapel.trim().toLowerCase();
+    return questions.filter((q) => {
+      const qKg = (q.kodeGuru || '').trim().toUpperCase();
+      const qMapel = (q.mapel || '').trim().toLowerCase();
+      const matchKg = !qKg || qKg === tKg;
+      const matchMapel = !qMapel || qMapel === tMapel;
+      return matchKg && matchMapel;
+    });
+  }, [questions, isTeacher, activeTeacherKg, activeTeacherMapel]);
+
   const initialCreds = getSupabaseCredentials();
   const [supabaseUrl, setSupabaseUrl] = useState<string>(initialCreds.url);
   const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(initialCreds.key);
@@ -137,6 +160,8 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
     if (isOpen) {
       if (role === 'teacher') {
         setActiveTab('questions');
+        setQuestionFilterGuru(activeTeacherKg);
+        setQuestionFilterMapel(activeTeacherMapel);
       } else {
         setActiveTab(initialTab);
       }
@@ -152,7 +177,7 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
         });
       }
     }
-  }, [isOpen, initialTab, role]);
+  }, [isOpen, initialTab, role, activeTeacherKg, activeTeacherMapel]);
 
   if (!isOpen) return null;
 
@@ -181,18 +206,39 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
 
   // --- QUESTION SYNC HANDLERS ---
   const handleBackupQuestionsNow = async () => {
-    if (!questions || questions.length === 0) {
-      setStatusMessage({ type: 'error', text: 'Tidak ada soal di browser untuk dicadangkan.' });
+    const questionsToBackup = isTeacher ? teacherMatchingQuestions : questions;
+
+    if (!questionsToBackup || questionsToBackup.length === 0) {
+      const msg = isTeacher
+        ? `Tidak ada butir soal untuk Guru ${activeTeacherNama} (${activeTeacherMapel}) di browser ini untuk dicadangkan.`
+        : 'Tidak ada soal di browser untuk dicadangkan.';
+      setStatusMessage({ type: 'error', text: msg });
+      showAlert(msg);
       return;
     }
 
     setIsLoading(true);
     setStatusMessage({
       type: 'info',
-      text: `Sedang mencadangkan ${questions.length} butir soal ke Supabase Cloud (Tabel bank_soal)...`,
+      text: `Sedang mencadangkan ${questionsToBackup.length} butir soal ${
+        isTeacher ? `khusus Guru ${activeTeacherNama} (${activeTeacherMapel})` : ''
+      } ke Supabase Cloud (Tabel bank_soal)...`,
     });
 
-    const result = await backupQuestionsToSupabase(questions, defaultKodeGuru, defaultMapel);
+    const result = await backupQuestionsToSupabase(
+      questionsToBackup,
+      activeTeacherKg,
+      activeTeacherMapel,
+      isTeacher ? activeTeacherNama : undefined,
+      isTeacher
+        ? {
+            isTeacher: true,
+            kodeGuru: activeTeacherKg,
+            nama: activeTeacherNama,
+            mapel: activeTeacherMapel,
+          }
+        : undefined
+    );
 
     setIsLoading(false);
     if (result.success) {
@@ -209,7 +255,6 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
       showAlert(result.message);
     } else {
       setStatusMessage({ type: 'error', text: result.message });
-      // Run diagnostic in background to identify missing table or RLS issue
       diagnoseSupabaseBankSoal().then((diag) => setDiagnosticData(diag));
       showAlert(result.message);
     }
@@ -221,15 +266,22 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
       return;
     }
 
+    const finalFilterGuru = isTeacher ? activeTeacherKg : questionFilterGuru;
+    const finalFilterMapel = isTeacher ? activeTeacherMapel : questionFilterMapel;
+
     setIsLoading(true);
     setStatusMessage({
       type: 'info',
-      text: 'Sedang mengunduh butir soal dari Supabase Cloud...',
+      text: `Sedang mengunduh butir soal dari Supabase Cloud untuk ${
+        isTeacher ? `${activeTeacherNama} (${activeTeacherMapel})` : `${finalFilterGuru} - ${finalFilterMapel}`
+      }...`,
     });
 
     const result = await restoreQuestionsFromSupabase({
-      kodeGuru: questionFilterGuru,
-      mapel: questionFilterMapel,
+      kodeGuru: finalFilterGuru,
+      mapel: finalFilterMapel,
+      namaGuru: isTeacher ? activeTeacherNama : undefined,
+      isTeacher: isTeacher,
     });
 
     setIsLoading(false);
@@ -242,7 +294,9 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
         }).`,
       });
       showAlert(
-        `Sukses! ${result.data.length} butir soal dari Supabase berhasil disinkronkan ke browser Anda.`
+        `Sukses! ${result.data.length} butir soal (${
+          isTeacher ? `${activeTeacherNama} - ${activeTeacherMapel}` : 'Bank Soal'
+        }) dari Supabase berhasil disinkronkan ke browser Anda.`
       );
     } else {
       const fullError =
@@ -252,7 +306,6 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
         type: 'error',
         text: `${result.message} ${result.diagnosticHelp ? `[${result.diagnosticHelp}]` : ''}`,
       });
-      // Automatically run diagnostic so UI displays the exact status and fix
       diagnoseSupabaseBankSoal().then((diag) => setDiagnosticData(diag));
       showAlert(fullError);
     }
@@ -435,16 +488,26 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
           {activeTab === 'questions' && (
             <div className="space-y-6">
               {/* Info Box */}
-              <div className="bg-sky-50 p-4 rounded-2xl border border-sky-200 text-sky-950 text-xs space-y-1.5">
-                <p className="font-bold flex items-center gap-2 text-sky-900">
-                  <Sparkles className="w-4 h-4 text-sky-600" /> Sinkronisasi Bank Soal Antar-Browser Guru
-                </p>
-                <p className="text-sky-800 leading-relaxed">
-                  Dengan Supabase, bank soal tidak lagi terkurung di satu browser laptop saja. Guru
-                  dapat mencadangkan soal ke database Supabase, lalu guru lain atau laptop lain dapat
-                  menarik soal tersebut secara instan!
-                </p>
-              </div>
+              {isTeacher ? (
+                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 text-amber-950 text-xs space-y-1.5">
+                  <p className="font-bold flex items-center gap-2 text-amber-900">
+                    <Shield className="w-4 h-4 text-amber-600" /> Mode Bank Soal Guru (Akses Terkunci Sesuai Akun)
+                  </p>
+                  <p className="text-amber-800 leading-relaxed">
+                    Anda sedang login sebagai <b>{activeTeacherNama}</b> ({activeTeacherKg}) - Mata Pelajaran <b>{activeTeacherMapel}</b>.
+                    Sesuai kebijakan, Anda hanya dapat menarik dan mencadangkan bank soal yang sesuai dengan <b>nama dan mata pelajaran Anda</b>.
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-sky-50 p-4 rounded-2xl border border-sky-200 text-sky-950 text-xs space-y-1.5">
+                  <p className="font-bold flex items-center gap-2 text-sky-900">
+                    <Sparkles className="w-4 h-4 text-sky-600" /> Sinkronisasi Bank Soal Antar-Browser (Akses Administrator Penuh)
+                  </p>
+                  <p className="text-sky-800 leading-relaxed">
+                    Sebagai Administrator, Anda memiliki akses penuh untuk mencadangkan dan menarik seluruh bank soal sekolah untuk semua guru dan mata pelajaran.
+                  </p>
+                </div>
+              )}
 
               {/* CURRENT QUESTIONS SUMMARY */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -457,10 +520,12 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
                       Bank Soal di Browser Ini
                     </span>
                     <strong className="text-xl text-slate-900 font-black">
-                      {questions.length} Butir Soal
+                      {isTeacher ? `${teacherMatchingQuestions.length} Butir Soal` : `${questions.length} Butir Soal`}
                     </strong>
-                    <span className="text-[10px] text-slate-400 block">
-                      Mapel: {defaultMapel} | Guru: {defaultKodeGuru}
+                    <span className="text-[10px] text-slate-500 font-semibold block">
+                      {isTeacher
+                        ? `Khusus ${activeTeacherNama} | Mapel: ${activeTeacherMapel}`
+                        : `Mapel: ${defaultMapel} | Guru: ${defaultKodeGuru}`}
                     </span>
                   </div>
                 </div>
@@ -494,19 +559,25 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
                       <CloudUpload className="w-5 h-5 text-emerald-600" />
                       <span>Cadangkan Soal Lokal ke Supabase</span>
                     </h4>
-                    <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
-                      Kirim <b>{questions.length} soal</b> yang ada di browser Anda ke tabel{' '}
-                      <code className="bg-emerald-100 px-1 py-0.5 rounded text-emerald-900 font-mono">
-                        bank_soal
-                      </code>{' '}
-                      di Supabase agar tersimpan aman di cloud.
-                    </p>
+                    {isTeacher ? (
+                      <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                        Kirim <b>{teacherMatchingQuestions.length} soal</b> milik Anda (<b>{activeTeacherNama}</b> - <b>{activeTeacherMapel}</b>) ke Supabase Cloud. Soal otomatis disimpan wajib atas nama dan mapel Anda.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                        Kirim <b>{questions.length} soal</b> yang ada di browser Anda ke tabel{' '}
+                        <code className="bg-emerald-100 px-1 py-0.5 rounded text-emerald-900 font-mono">
+                          bank_soal
+                        </code>{' '}
+                        di Supabase agar tersimpan aman di cloud.
+                      </p>
+                    )}
                   </div>
 
                   <button
                     type="button"
                     onClick={handleBackupQuestionsNow}
-                    disabled={isLoading || !isConfigured || questions.length === 0}
+                    disabled={isLoading || !isConfigured || (isTeacher ? teacherMatchingQuestions.length === 0 : questions.length === 0)}
                     className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-black py-3 px-4 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
                   >
                     {isLoading ? (
@@ -514,7 +585,9 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
                     ) : (
                       <CloudUpload className="w-4 h-4" />
                     )}
-                    <span>Upload {questions.length} Soal ke Supabase</span>
+                    <span>
+                      Upload {isTeacher ? teacherMatchingQuestions.length : questions.length} Soal ke Supabase
+                    </span>
                   </button>
                 </div>
 
@@ -527,47 +600,79 @@ export const SupabaseBackupModal: React.FC<SupabaseBackupModalProps> = ({
                         <span>Tarik Soal dari Supabase Cloud</span>
                       </h4>
                       <p className="text-xs text-blue-800 mt-1 leading-relaxed">
-                        Unduh bank soal dari Supabase Cloud ke browser Anda untuk digunakan dalam ujian CBT.
+                        {isTeacher
+                          ? `Unduh bank soal Anda (${activeTeacherNama} - ${activeTeacherMapel}) dari Supabase Cloud ke browser ini.`
+                          : 'Unduh bank soal dari Supabase Cloud ke browser Anda untuk digunakan dalam ujian CBT.'}
                       </p>
                     </div>
 
                     {/* Filter Options */}
                     <div className="space-y-2 bg-white/70 p-3 rounded-xl border border-blue-100 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-[11px] font-bold text-slate-700">Filter Guru:</label>
-                        <select
-                          value={questionFilterGuru}
-                          onChange={(e) => setQuestionFilterGuru(e.target.value)}
-                          className="bg-white border border-slate-300 rounded-lg p-1 text-xs font-semibold"
-                        >
-                          <option value="ALL">Semua Guru (Bank Soal Sekolah)</option>
-                          <option value={defaultKodeGuru}>Hanya Guru Ini ({defaultKodeGuru})</option>
-                          {teachers.map((t) => (
-                            <option key={t.id} value={t.kodeGuru || t.nip}>
-                              {t.nama} ({t.kodeGuru})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      {isTeacher ? (
+                        <>
+                          <div className="flex items-center justify-between gap-2 p-2 bg-blue-50/80 rounded-lg border border-blue-200">
+                            <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-blue-600" /> Guru:
+                            </span>
+                            <span className="font-extrabold text-blue-900 text-xs truncate max-w-[170px]" title={`${activeTeacherNama} (${activeTeacherKg})`}>
+                              {activeTeacherNama} ({activeTeacherKg})
+                            </span>
+                            <span className="text-[10px] bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded font-bold">
+                              Terkunci
+                            </span>
+                          </div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-[11px] font-bold text-slate-700">Filter Mapel:</label>
-                        <select
-                          value={questionFilterMapel}
-                          onChange={(e) => setQuestionFilterMapel(e.target.value)}
-                          className="bg-white border border-slate-300 rounded-lg p-1 text-xs font-semibold"
-                        >
-                          <option value="ALL">Semua Mata Pelajaran</option>
-                          {defaultMapel && (
-                            <option value={defaultMapel}>Hanya Mapel Ini ({defaultMapel})</option>
-                          )}
-                          {(mapelList || []).filter((m) => m !== defaultMapel).map((m) => (
-                            <option key={m} value={m}>
-                              {m}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                          <div className="flex items-center justify-between gap-2 p-2 bg-blue-50/80 rounded-lg border border-blue-200">
+                            <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-blue-600" /> Mapel:
+                            </span>
+                            <span className="font-extrabold text-blue-900 text-xs truncate max-w-[170px]" title={activeTeacherMapel}>
+                              {activeTeacherMapel}
+                            </span>
+                            <span className="text-[10px] bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded font-bold">
+                              Terkunci
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-[11px] font-bold text-slate-700">Filter Guru:</label>
+                            <select
+                              value={questionFilterGuru}
+                              onChange={(e) => setQuestionFilterGuru(e.target.value)}
+                              className="bg-white border border-slate-300 rounded-lg p-1 text-xs font-semibold"
+                            >
+                              <option value="ALL">Semua Guru (Bank Soal Sekolah)</option>
+                              <option value={defaultKodeGuru}>Hanya Guru Ini ({defaultKodeGuru})</option>
+                              {teachers.map((t) => (
+                                <option key={t.id} value={t.kodeGuru || t.nip}>
+                                  {t.nama} ({t.kodeGuru})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-[11px] font-bold text-slate-700">Filter Mapel:</label>
+                            <select
+                              value={questionFilterMapel}
+                              onChange={(e) => setQuestionFilterMapel(e.target.value)}
+                              className="bg-white border border-slate-300 rounded-lg p-1 text-xs font-semibold"
+                            >
+                              <option value="ALL">Semua Mata Pelajaran</option>
+                              {defaultMapel && (
+                                <option value={defaultMapel}>Hanya Mapel Ini ({defaultMapel})</option>
+                              )}
+                              {(mapelList || []).filter((m) => m !== defaultMapel).map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </>
+                      )}
 
                       <div className="flex items-center justify-between gap-2">
                         <label className="text-[11px] font-bold text-slate-700">Mode Sinkron:</label>

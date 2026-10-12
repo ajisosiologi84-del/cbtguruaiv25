@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS master_admins (
 CREATE TABLE IF NOT EXISTS bank_soal (
   id BIGINT PRIMARY KEY,
   kode_guru TEXT NOT NULL,
+  nama_guru TEXT,
   mapel TEXT NOT NULL,
   bentuk_soal TEXT NOT NULL,
   question TEXT NOT NULL,
@@ -115,8 +116,12 @@ CREATE TABLE IF NOT EXISTS bank_soal (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Migrasi aman jika tabel bank_soal sudah ada sebelumnya
+ALTER TABLE bank_soal ADD COLUMN IF NOT EXISTS nama_guru TEXT;
+
 -- Index untuk mempercepat query berdasarkan guru dan mapel
 CREATE INDEX IF NOT EXISTS idx_bank_soal_guru ON bank_soal (kode_guru);
+CREATE INDEX IF NOT EXISTS idx_bank_soal_nama_guru ON bank_soal (nama_guru);
 CREATE INDEX IF NOT EXISTS idx_bank_soal_mapel ON bank_soal (mapel);
 
 -- Aktifkan Row Level Security (RLS) & Izinkan Akses Baca/Tulis
@@ -568,13 +573,22 @@ export const authenticateStudentWithSupabase = async (
   }
 };
 
+export interface TeacherRestriction {
+  isTeacher: boolean;
+  kodeGuru: string;
+  nama: string;
+  mapel: string;
+}
+
 /**
  * Backup array of questions to Supabase table 'bank_soal'
  */
 export const backupQuestionsToSupabase = async (
   questions: Question[],
   defaultKodeGuru?: string,
-  defaultMapel?: string
+  defaultMapel?: string,
+  defaultNamaGuru?: string,
+  teacherRestriction?: TeacherRestriction
 ): Promise<SupabaseSyncResult> => {
   if (!isSupabaseConfigured()) {
     return {
@@ -592,11 +606,40 @@ export const backupQuestionsToSupabase = async (
     return { success: false, message: 'Tidak ada butir soal untuk dicadangkan.' };
   }
 
+  // Enforce teacher restrictions on questions to be saved
+  let targetQuestions = questions;
+  if (teacherRestriction?.isTeacher) {
+    const tKg = (teacherRestriction.kodeGuru || '').trim().toUpperCase();
+    const tMapel = (teacherRestriction.mapel || '').trim().toLowerCase();
+    targetQuestions = questions.filter((q) => {
+      const qKg = (q.kodeGuru || '').trim().toUpperCase();
+      const qMapel = (q.mapel || '').trim().toLowerCase();
+      // Questions without assigned code/mapel or matching this teacher's code & mapel
+      const matchKg = !qKg || qKg === tKg;
+      const matchMapel = !qMapel || qMapel === tMapel;
+      return matchKg && matchMapel;
+    });
+
+    if (targetQuestions.length === 0) {
+      return {
+        success: false,
+        message: `Tidak ada soal yang sesuai dengan profil Anda (${teacherRestriction.nama} - Mapel: ${teacherRestriction.mapel}) untuk disimpan ke Cloud. Pastikan soal berlabel mapel "${teacherRestriction.mapel}".`,
+      };
+    }
+  }
+
   try {
-    const payload = questions.map((q) => ({
+    const payload = targetQuestions.map((q) => ({
       id: Number(q.id),
-      kode_guru: q.kodeGuru || defaultKodeGuru || 'GURU01',
-      mapel: q.mapel || defaultMapel || 'Umum',
+      kode_guru: teacherRestriction?.isTeacher
+        ? teacherRestriction.kodeGuru
+        : (q.kodeGuru || defaultKodeGuru || 'GURU01'),
+      nama_guru: teacherRestriction?.isTeacher
+        ? teacherRestriction.nama
+        : (defaultNamaGuru || ''),
+      mapel: teacherRestriction?.isTeacher
+        ? teacherRestriction.mapel
+        : (q.mapel || defaultMapel || 'Umum'),
       bentuk_soal: q.bentukSoal || 'Pilihan Ganda',
       question: q.question,
       options: q.options || [],
@@ -615,6 +658,37 @@ export const backupQuestionsToSupabase = async (
       updated_at: new Date().toISOString(),
     }));
 
+    // Safety: For teacher, check if any question ID already belongs to another teacher in bank_soal
+    if (teacherRestriction?.isTeacher) {
+      try {
+        const idsToCheck = payload.map((p) => p.id);
+        const { data: existingRows } = await client
+          .from('bank_soal')
+          .select('id, kode_guru')
+          .in('id', idsToCheck);
+
+        if (existingRows && existingRows.length > 0) {
+          const otherTeacherConflictIds = new Set(
+            existingRows
+              .filter((r: any) => {
+                const rKg = String(r.kode_guru || '').trim().toUpperCase();
+                return rKg !== teacherRestriction.kodeGuru.trim().toUpperCase();
+              })
+              .map((r: any) => Number(r.id))
+          );
+
+          if (otherTeacherConflictIds.size > 0) {
+            // Reassign conflict IDs to avoid overwriting another teacher's question
+            payload.forEach((p, idx) => {
+              if (otherTeacherConflictIds.has(p.id)) {
+                p.id = Date.now() + idx + Math.floor(Math.random() * 1000);
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
     // Perform upsert with batch size of 100
     const chunkSize = 100;
     for (let i = 0; i < payload.length; i += chunkSize) {
@@ -622,6 +696,15 @@ export const backupQuestionsToSupabase = async (
       let { error } = await client
         .from('bank_soal')
         .upsert(chunk, { onConflict: 'id' });
+
+      // Fallback: If nama_guru column is missing in legacy table, strip it and retry
+      if (error && error.message && error.message.toLowerCase().includes('nama_guru')) {
+        const safeChunk = chunk.map(({ nama_guru, ...rest }: any) => rest);
+        const retry = await client
+          .from('bank_soal')
+          .upsert(safeChunk, { onConflict: 'id' });
+        error = retry.error;
+      }
 
       if (error && (error.message.includes('unique') || error.message.includes('conflict') || error.message.includes('constraint'))) {
         const retry = await client
@@ -652,10 +735,14 @@ export const backupQuestionsToSupabase = async (
       }
     }
 
+    const successMsg = teacherRestriction?.isTeacher
+      ? `Berhasil mencadangkan ${targetQuestions.length} butir soal ke Supabase Cloud khusus untuk ${teacherRestriction.nama} (${teacherRestriction.mapel})!`
+      : `Berhasil mencadangkan ${targetQuestions.length} butir soal ke Supabase Cloud (Tabel bank_soal)!`;
+
     return {
       success: true,
-      message: `Berhasil mencadangkan ${questions.length} butir soal ke Supabase Cloud (Tabel bank_soal)!`,
-      count: questions.length,
+      message: successMsg,
+      count: targetQuestions.length,
     };
   } catch (err: any) {
     return {
@@ -801,10 +888,19 @@ export const diagnoseSupabaseBankSoal = async (): Promise<SupabaseDiagnosticResu
 /**
  * Restore / Pull questions from Supabase table 'bank_soal'
  */
-export const restoreQuestionsFromSupabase = async (filter?: {
+export interface RestoreQuestionsFilter {
   kodeGuru?: string;
   mapel?: string;
-}): Promise<{
+  namaGuru?: string;
+  isTeacher?: boolean;
+}
+
+/**
+ * Restore / Pull questions from Supabase table 'bank_soal'
+ */
+export const restoreQuestionsFromSupabase = async (
+  filter?: RestoreQuestionsFilter
+): Promise<{
   success: boolean;
   message: string;
   data?: Question[];
@@ -828,18 +924,39 @@ export const restoreQuestionsFromSupabase = async (filter?: {
     };
   }
 
+  const isTeacherRole = Boolean(filter?.isTeacher);
+  const targetKg = (filter?.kodeGuru || '').trim();
+  const targetMapel = (filter?.mapel || '').trim();
+  const targetNama = (filter?.namaGuru || '').trim();
+
+  // Strict check: Teachers are not allowed to pull without valid teacher profile and subject
+  if (isTeacherRole && (!targetKg || targetKg === 'ALL' || !targetMapel || targetMapel === 'ALL')) {
+    return {
+      success: false,
+      message: 'Guru hanya dapat menarik soal sesuai kode guru dan mata pelajaran akun yang sedang login.',
+      diagnosticHelp: 'Pastikan profil Guru dan Mata Pelajaran Anda aktif saat login.',
+    };
+  }
+
   try {
     let query = client.from('bank_soal').select('*');
 
-    const guruFilter = filter?.kodeGuru?.trim();
-    if (guruFilter && guruFilter !== 'ALL') {
-      // Case-insensitive ilike matching to avoid uppercase/lowercase mismatch
-      query = query.ilike('kode_guru', guruFilter);
-    }
-
-    const mapelFilter = filter?.mapel?.trim();
-    if (mapelFilter && mapelFilter !== 'ALL') {
-      query = query.ilike('mapel', mapelFilter);
+    if (isTeacherRole) {
+      // Strictly restrict query to the logged-in teacher and subject
+      if (targetNama) {
+        query = query.or(`kode_guru.ilike.${targetKg},nama_guru.ilike.%${targetNama}%`);
+      } else {
+        query = query.ilike('kode_guru', targetKg);
+      }
+      query = query.ilike('mapel', targetMapel);
+    } else {
+      // Admin: has full permission across any or all teachers and subjects
+      if (targetKg && targetKg !== 'ALL') {
+        query = query.ilike('kode_guru', targetKg);
+      }
+      if (targetMapel && targetMapel !== 'ALL') {
+        query = query.ilike('mapel', targetMapel);
+      }
     }
 
     query = query.order('id', { ascending: true });
@@ -871,7 +988,21 @@ export const restoreQuestionsFromSupabase = async (filter?: {
       };
     }
 
-    if (!dbQuestions || dbQuestions.length === 0) {
+    // Filter questions rigorously in memory
+    let matchingRows = dbQuestions || [];
+    if (isTeacherRole) {
+      matchingRows = matchingRows.filter((row: any) => {
+        const rowKg = String(row.kode_guru || '').trim().toLowerCase();
+        const rowNama = String(row.nama_guru || '').trim().toLowerCase();
+        const rowMapel = String(row.mapel || '').trim().toLowerCase();
+
+        const matchKgOrName = rowKg === targetKg.toLowerCase() || (targetNama && rowNama.includes(targetNama.toLowerCase()));
+        const matchMapel = rowMapel === targetMapel.toLowerCase();
+        return matchKgOrName && matchMapel;
+      });
+    }
+
+    if (matchingRows.length === 0) {
       // Check whether table has ANY questions in general to give precise feedback
       let totalInCloud = 0;
       try {
@@ -888,17 +1019,22 @@ export const restoreQuestionsFromSupabase = async (filter?: {
           count: 0,
         };
       } else {
+        const scopeDesc = isTeacherRole
+          ? `Guru: ${targetNama || targetKg} | Mapel: ${targetMapel}`
+          : `${targetKg ? `Guru: ${targetKg}` : ''} ${targetMapel ? `Mapel: ${targetMapel}` : ''}`;
         return {
           success: false,
-          message: `Tidak ditemukan soal yang cocok dengan filter (${guruFilter ? `Guru: ${guruFilter}` : ''} ${mapelFilter ? `Mapel: ${mapelFilter}` : ''}).`,
-          diagnosticHelp: `Di database Supabase terdapat ${totalInCloud} butir soal lain. Coba ganti "Filter Guru" ke "Semua Guru" dan "Filter Mapel" ke "Semua Mata Pelajaran" untuk menarik seluruh soal!`,
+          message: `Tidak ditemukan soal yang cocok di Supabase Cloud (${scopeDesc}).`,
+          diagnosticHelp: isTeacherRole
+            ? `Pastikan Anda telah mencadangkan soal untuk Guru "${targetNama || targetKg}" pada Mapel "${targetMapel}". Di database terdapat ${totalInCloud} soal dari guru/mapel lain.`
+            : `Di database Supabase terdapat ${totalInCloud} butir soal lain. Coba ganti "Filter Guru" ke "Semua Guru" dan "Filter Mapel" ke "Semua Mata Pelajaran" untuk menarik seluruh soal!`,
           data: [],
           count: 0,
         };
       }
     }
 
-    const questions: Question[] = dbQuestions.map((row: any) => ({
+    const questions: Question[] = matchingRows.map((row: any) => ({
       id: Number(row.id) || Date.now(),
       question: row.question,
       options: Array.isArray(row.options) ? row.options : (typeof row.options === 'string' ? JSON.parse(row.options) : []),
@@ -909,19 +1045,23 @@ export const restoreQuestionsFromSupabase = async (filter?: {
       images: Array.isArray(row.images) ? row.images : [],
       imagePosition: row.image_position || 'top',
       isActive: row.is_active !== false,
-      mapel: row.mapel,
+      mapel: isTeacherRole ? targetMapel : row.mapel,
       kompetensi: row.kompetensi || undefined,
       subTopik: row.sub_topik || undefined,
       bentukSoal: row.bentuk_soal || 'Pilihan Ganda',
-      kodeGuru: row.kode_guru || undefined,
+      kodeGuru: isTeacherRole ? targetKg : (row.kode_guru || undefined),
       categoryOptions: Array.isArray(row.category_options) ? row.category_options : undefined,
       categoryStatements: Array.isArray(row.category_statements) ? row.category_statements : undefined,
       poin: row.poin || 10,
     }));
 
+    const successMsg = isTeacherRole
+      ? `Sukses! Berhasil mengunduh ${questions.length} butir soal khusus untuk ${targetNama || targetKg} (${targetMapel}) dari Supabase Cloud!`
+      : `Berhasil mengunduh ${questions.length} butir soal dari Supabase Cloud!`;
+
     return {
       success: true,
-      message: `Berhasil mengunduh ${questions.length} butir soal dari Supabase Cloud!`,
+      message: successMsg,
       data: questions,
       count: questions.length,
     };
