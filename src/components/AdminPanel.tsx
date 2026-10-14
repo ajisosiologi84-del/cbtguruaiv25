@@ -5442,11 +5442,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsJsonQuestionsModalOpen(true)}
-                  className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
-                  title="Cadangkan Bank Soal ke format JSON lengkap beserta aset Gambar Base64"
+                  className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ring-2 ring-blue-300/50"
+                  title="Simpan atau buka paket soal ke file JSON offline di komputer tanpa perlu koneksi internet"
                 >
                   <FileJson className="w-4 h-4 text-blue-100" />
-                  <span>Cadangkan JSON (+ Gambar)</span>
+                  <span>Simpan / Buka JSON (Offline)</span>
+                  <span className="bg-blue-500/80 text-[10px] px-1.5 py-0.2 rounded font-mono">.json</span>
                 </button>
 
                 <button
@@ -5476,6 +5477,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   ) : (
                     <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
                   )}
+                </button>
+              </div>
+            </div>
+
+            {/* Offline-First & Zero Data Loss Helper Banner */}
+            <div className="bg-gradient-to-r from-blue-50 via-sky-50 to-emerald-50 border border-blue-200/80 rounded-xl p-3 mb-4 flex items-center justify-between flex-wrap gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="flex h-2.5 w-2.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-slate-700">
+                  <strong>Penyimpanan Offline-First Aktif:</strong> Setiap pembuatan, editing, & impor soal tersimpan instan di browser lokal (IndexedDB). Anda dapat menyimpan berkas paket ke file <strong>.json</strong> di laptop masing-masing secara offline, atau mencadangkannya ke Cloud Supabase saat sudah siap.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsJsonQuestionsModalOpen(true)}
+                  className="bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 font-bold px-2.5 py-1 rounded-lg text-[11px] shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <FileJson className="w-3 h-3 text-blue-600" />
+                  <span>Kelola Berkas .json Offline</span>
                 </button>
               </div>
             </div>

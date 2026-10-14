@@ -435,18 +435,23 @@ export default function App() {
             ...remoteConfig,
             questions: cleanedQuestions,
           });
-          setConfig((prev) => ({
-            ...merged,
-          questions: cleanedQuestions,
-          students: (merged.students && merged.students.length > 0) ? merged.students : prev.students,
-          teachers: (merged.teachers && merged.teachers.length > 0) ? merged.teachers : prev.teachers,
-        }));
-        const updatedConfig = { ...merged, questions: cleanedQuestions };
-        safeSaveConfigToLocalStorage(STORAGE_KEY, updatedConfig);
-        setItemIDB(STORAGE_KEY, updatedConfig).catch(() => {});
+          setConfig((prev) => {
+            // KRUSIAL: Jika pengguna adalah Guru yang sedang login, JANGAN menimpa soal lokal guru dengan snapshot remote!
+            // Ini mencegah soal yang sedang dikerjakan/diedit oleh guru tiba-tiba hilang karena tertimpa sinkronisasi background.
+            const finalQuestions = adminRole === 'teacher' ? prev.questions : cleanedQuestions;
+            const updatedConfig = {
+              ...merged,
+              questions: finalQuestions,
+              students: (merged.students && merged.students.length > 0) ? merged.students : prev.students,
+              teachers: (merged.teachers && merged.teachers.length > 0) ? merged.teachers : prev.teachers,
+            };
+            safeSaveConfigToLocalStorage(STORAGE_KEY, updatedConfig);
+            setItemIDB(STORAGE_KEY, updatedConfig).catch(() => {});
+            return updatedConfig;
+          });
+        }
       }
-    }
-  });
+    });
 
     const unsubTeachers = subscribeTeachersFromFirebase((remoteTeachers) => {
       if (Array.isArray(remoteTeachers) && remoteTeachers.length > 0) {
@@ -1380,23 +1385,8 @@ export default function App() {
     setIsQuestionModalOpen(false);
     setEditingQuestion(null);
 
-    // Auto-save teacher's questions to Supabase Cloud if configured
-    if (isSupabaseConfigured()) {
-      const activeMapel = qData.mapel || config.mapel || 'Sosiologi';
-      backupQuestionsToSupabase(updatedQuestions, activeKodeGuru, activeMapel)
-        .then((res) => {
-          if (res.success) {
-            showAlert('Soal berhasil disimpan & otomatis tersinkron ke Bank Soal Cloud Supabase! ☁️');
-          } else {
-            showAlert('Soal berhasil disimpan di browser lokal.');
-          }
-        })
-        .catch(() => {
-          showAlert('Soal berhasil disimpan di browser lokal.');
-        });
-    } else {
-      showAlert('Soal berhasil disimpan!');
-    }
+    // Simpan cepat ke penyimpanan lokal (IndexedDB + State) tanpa hambatan jaringan
+    showAlert('Soal berhasil disimpan di browser lokal (Offline)! Gunakan tombol "Simpan ke Cloud" di menu Bank Soal jika ingin mencadangkannya ke Supabase.');
   };
 
   const handleDeleteQuestion = (qId: number) => {
