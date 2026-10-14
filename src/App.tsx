@@ -262,6 +262,11 @@ export default function App() {
     return [];
   });
 
+  // View State & Admin Role
+  const [viewState, setViewState] = useState<ViewState>('login');
+  const [adminRole, setAdminRole] = useState<'admin' | 'teacher'>('admin');
+  const [loggedInTeacher, setLoggedInTeacher] = useState<TeacherUser | null>(null);
+
   // Save config to LocalStorage, IndexedDB & Firebase on updates
   const saveConfig = useCallback((newConfig: AppConfig) => {
     const activeToken = newConfig.examToken?.trim() || 'SOS2026';
@@ -272,17 +277,29 @@ export default function App() {
     };
     setConfig(updatedConfig);
 
-    // 1. Independent Firebase sync (not blocked by local storage limitations)
-    saveConfigToFirebase(updatedConfig).catch((fbErr) => {
-      console.warn('[Firebase] Remote sync notice:', fbErr);
-    });
-
-    // 2. High-capacity IndexedDB storage for offline persistence with full base64 images
+    // 1. High-capacity IndexedDB storage for offline persistence with full base64 images
     setItemIDB(STORAGE_KEY, updatedConfig).catch(() => {});
 
-    // 3. Safe LocalStorage save with progressive quota fallbacks
+    // 2. Safe LocalStorage save with progressive quota fallbacks
     safeSaveConfigToLocalStorage(STORAGE_KEY, updatedConfig);
-  }, []);
+
+    // 3. Isolated Teacher Question Storage:
+    // Jika guru sedang login, simpan kumpulan soal miliknya secara terisolasi di IndexedDB lokal
+    if (loggedInTeacher?.kodeGuru) {
+      const teacherKey = `cbt_teacher_${loggedInTeacher.kodeGuru.toUpperCase()}_${(loggedInTeacher.mapel || '').trim().toLowerCase()}`;
+      setItemIDB(teacherKey, updatedConfig.questions).catch(() => {});
+    }
+
+    // 4. Firebase sync:
+    // PENTING: Perangkat guru TIDAK TERHUBUNG antar perangkat guru lain via Firebase!
+    // Guru HANYA terhubung ke browser lokal & Supabase Cloud.
+    // HANYA Admin yang menyinkronkan data master / konfigurasi ujian ke Firebase.
+    if (adminRole === 'admin' && !loggedInTeacher) {
+      saveConfigToFirebase(updatedConfig).catch((fbErr) => {
+        console.warn('[Firebase] Remote sync notice (Admin):', fbErr);
+      });
+    }
+  }, [adminRole, loggedInTeacher]);
 
   const saveStudentResults = useCallback((results: StudentResult[]) => {
     const seenIds = new Set<string>();
@@ -297,11 +314,6 @@ export default function App() {
     setStudentResults(sanitizedResults);
     safeSaveResultsToLocalStorage(RESULTS_KEY, sanitizedResults);
   }, []);
-
-  // View State & Admin Role
-  const [viewState, setViewState] = useState<ViewState>('login');
-  const [adminRole, setAdminRole] = useState<'admin' | 'teacher'>('admin');
-  const [loggedInTeacher, setLoggedInTeacher] = useState<TeacherUser | null>(null);
 
   // Helper to merge remote config without losing locally updated token
   const mergeRemoteConfigWithLocalToken = (remoteConfig: AppConfig): AppConfig => {
@@ -429,6 +441,11 @@ export default function App() {
         if (remoteConfig.supabaseUrl || remoteConfig.supabaseAnonKey) {
           setRuntimeSupabaseCredentials(remoteConfig.supabaseUrl, remoteConfig.supabaseAnonKey);
         }
+        // Perangkat guru TIDAK terhubung antar perangkat guru lain via Firebase!
+        // Guru murni menggunakan browser lokal dan Supabase Cloud pribadi.
+        if (adminRole === 'teacher' || loggedInTeacher) {
+          return;
+        }
         if (Array.isArray(remoteConfig.questions)) {
           const cleanedQuestions = remoteConfig.questions.filter((q) => !isLegacyDefaultQuestion(q));
           const merged = mergeRemoteConfigWithLocalToken({
@@ -436,12 +453,9 @@ export default function App() {
             questions: cleanedQuestions,
           });
           setConfig((prev) => {
-            // KRUSIAL: Jika pengguna adalah Guru yang sedang login, JANGAN menimpa soal lokal guru dengan snapshot remote!
-            // Ini mencegah soal yang sedang dikerjakan/diedit oleh guru tiba-tiba hilang karena tertimpa sinkronisasi background.
-            const finalQuestions = adminRole === 'teacher' ? prev.questions : cleanedQuestions;
             const updatedConfig = {
               ...merged,
-              questions: finalQuestions,
+              questions: cleanedQuestions,
               students: (merged.students && merged.students.length > 0) ? merged.students : prev.students,
               teachers: (merged.teachers && merged.teachers.length > 0) ? merged.teachers : prev.teachers,
             };
@@ -1416,6 +1430,19 @@ export default function App() {
           onAdminLoginSuccess={(role, teacherDetails) => {
             setAdminRole(role);
             setLoggedInTeacher(teacherDetails || null);
+            if (role === 'teacher' && teacherDetails?.kodeGuru) {
+              const teacherKey = `cbt_teacher_${teacherDetails.kodeGuru.toUpperCase()}_${(teacherDetails.mapel || '').trim().toLowerCase()}`;
+              getItemIDB<Question[]>(teacherKey).then((savedTeacherQuestions) => {
+                if (Array.isArray(savedTeacherQuestions) && savedTeacherQuestions.length > 0) {
+                  setConfig((prev) => ({
+                    ...prev,
+                    questions: savedTeacherQuestions,
+                    mapel: teacherDetails.mapel || prev.mapel,
+                    kodeGuru: teacherDetails.kodeGuru,
+                  }));
+                }
+              }).catch(() => {});
+            }
             setViewState('admin');
           }}
         />

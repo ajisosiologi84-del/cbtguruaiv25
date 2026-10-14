@@ -5349,14 +5349,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </button>
             </div>
 
-            <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100 text-sm text-blue-900 space-y-2">
-              <p className="font-bold flex items-center gap-2 text-blue-800">
-                <Info className="w-4 h-4 text-blue-600" /> Informasi Penyimpanan Data
-              </p>
-              <p className="text-xs text-blue-800 leading-relaxed">
-                Semua soal dan konfigurasi tersimpan di <b>Local Storage</b> browser Anda serta dapat dicadangkan ke <b>Supabase Cloud</b> untuk sinkronisasi antar-perangkat.
-              </p>
-            </div>
+            {adminRole === 'teacher' || loggedInTeacher ? (
+              <div className="bg-emerald-50/90 p-5 rounded-2xl border border-emerald-200 text-sm text-emerald-950 space-y-2.5 shadow-2xs">
+                <p className="font-bold flex items-center gap-2 text-emerald-800">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" /> Mode Guru Mandiri (Lokal & Supabase)
+                </p>
+                <p className="text-xs text-emerald-900 leading-relaxed">
+                  Soal Anda tersimpan secara mandiri di <b>Browser Lokal (IndexedDB)</b> dan <b>TIDAK terhubung/tercampur dengan perangkat guru lain</b>. Soal hanya terhubung ke <b>Supabase Cloud</b> khusus akun Anda (sesuai Nama & Mapel) saat dicadangkan atau ditarik.
+                </p>
+                <div className="text-[11px] text-emerald-800 bg-white/90 p-2.5 rounded-xl border border-emerald-200 flex items-center gap-2 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                  <span>Perangkat Anda terlindungi dari penimpaan antar-guru. Administrator dapat melihat dan memantau seluruh bank soal sekolah.</span>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-blue-50 p-5 rounded-2xl border border-blue-200 text-sm text-blue-950 space-y-2.5 shadow-2xs">
+                <p className="font-bold flex items-center gap-2 text-blue-800">
+                  <Info className="w-4 h-4 text-blue-600" /> Mode Administrator (Akses Penuh Semua Guru)
+                </p>
+                <p className="text-xs text-blue-900 leading-relaxed">
+                  Sebagai <b>Administrator</b>, Anda memiliki hak akses penuh untuk <b>melihat, memantau, dan menarik seluruh butir soal dari semua guru dan semua mata pelajaran</b> baik di browser lokal maupun di Supabase Cloud.
+                </p>
+                <div className="text-[11px] text-blue-800 bg-white/90 p-2.5 rounded-xl border border-blue-200 flex items-center gap-2 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                  <span>Gunakan filter "Semua Guru" atau menu Bank Soal Cloud untuk mengelola kumpulan soal dari seluruh guru pengampu.</span>
+                </div>
+              </div>
+            )}
 
             {/* Kosongkan Bank Soal */}
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
