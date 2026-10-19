@@ -200,6 +200,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Schedule & Exam Session Config State
   const [scheduleStartTime, setScheduleStartTime] = useState<string>(config.examSchedule?.startTime || '');
   const [scheduleEndTime, setScheduleEndTime] = useState<string>(config.examSchedule?.endTime || '');
+  const [enforceScheduleEndTime, setEnforceScheduleEndTime] = useState<boolean>(config.examSchedule?.enforceScheduleEndTime === true);
   const [sessionStatus, setSessionStatus] = useState<'DRAFT' | 'ACTIVE' | 'CLOSED'>(config.examSchedule?.sessionStatus || 'ACTIVE');
   const [lateTolerance, setLateTolerance] = useState<number>(config.examSchedule?.lateToleranceMinutes || 15);
   const [allowReviewAfterFinish, setAllowReviewAfterFinish] = useState<boolean>(config.examSchedule?.allowReviewAfterFinish !== false);
@@ -348,10 +349,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return list;
   };
 
-  const [mapelInput, setMapelInput] = useState<string>(config.mapel || 'Sosiologi');
-  const [kodeGuruInput, setKodeGuruInput] = useState<string>(config.kodeGuru || 'GURU01');
+  const [mapelInput, setMapelInput] = useState<string>(
+    loggedInTeacher?.mapel || config.mapel || 'Sosiologi'
+  );
+  const [kodeGuruInput, setKodeGuruInput] = useState<string>(
+    loggedInTeacher?.kodeGuru || config.kodeGuru || 'GURU01'
+  );
   const [mapelTitleInput, setMapelTitleInput] = useState<string>(
-    config.mapelTitle || 'Assessment TKA SMA'
+    loggedInTeacher?.mapel
+      ? `Assessment TKA ${loggedInTeacher.mapel} SMA`
+      : (config.mapelTitle || 'Assessment TKA SMA')
   );
   const [subTitleInput, setSubTitleInput] = useState<string>(
     config.subTitle || 'Perubahan Sosial & Globalisasi'
@@ -378,10 +385,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Question Selection & Batch State
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<number[]>([]);
-  const [selectedBankMapel, setSelectedBankMapel] = useState<string>('ALL');
+  const [selectedBankMapel, setSelectedBankMapel] = useState<string>(
+    loggedInTeacher?.mapel || 'ALL'
+  );
   const [selectedBankKompetensi, setSelectedBankKompetensi] = useState<string>('ALL');
   const [selectedBankBentukSoal, setSelectedBankBentukSoal] = useState<string>('ALL');
-  const [selectedBankKodeGuru, setSelectedBankKodeGuru] = useState<string>('ALL');
+  const [selectedBankKodeGuru, setSelectedBankKodeGuru] = useState<string>(
+    loggedInTeacher?.kodeGuru || 'ALL'
+  );
 
   // Bank Soal Tools Hub State
   const [isBankToolsExpanded, setIsBankToolsExpanded] = useState<boolean>(true);
@@ -611,11 +622,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, [selectedGuruFilter]);
 
   React.useEffect(() => {
-    if (loggedInTeacher?.kodeGuru) {
-      setSelectedGuruFilter(loggedInTeacher.kodeGuru);
-      setSelectedBankKodeGuru(loggedInTeacher.kodeGuru);
-      setStudentKodeGuruFilter(loggedInTeacher.kodeGuru);
-      setRekapKodeGuruFilter(loggedInTeacher.kodeGuru);
+    if (loggedInTeacher) {
+      if (loggedInTeacher.kodeGuru) {
+        setSelectedGuruFilter(loggedInTeacher.kodeGuru);
+        setSelectedBankKodeGuru(loggedInTeacher.kodeGuru);
+        setStudentKodeGuruFilter(loggedInTeacher.kodeGuru);
+        setRekapKodeGuruFilter(loggedInTeacher.kodeGuru);
+        setKodeGuruInput(loggedInTeacher.kodeGuru);
+      }
+      if (loggedInTeacher.mapel) {
+        setMapelInput(loggedInTeacher.mapel);
+        setSelectedBankMapel(loggedInTeacher.mapel);
+        setMapelTitleInput(`Assessment TKA ${loggedInTeacher.mapel} SMA`);
+      }
     }
   }, [loggedInTeacher]);
 
@@ -637,6 +656,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (tConfig.examSchedule) {
         if (tConfig.examSchedule.startTime !== undefined) setScheduleStartTime(tConfig.examSchedule.startTime || '');
         if (tConfig.examSchedule.endTime !== undefined) setScheduleEndTime(tConfig.examSchedule.endTime || '');
+        if (tConfig.examSchedule.enforceScheduleEndTime !== undefined) setEnforceScheduleEndTime(tConfig.examSchedule.enforceScheduleEndTime === true);
         if (tConfig.examSchedule.sessionStatus) setSessionStatus(tConfig.examSchedule.sessionStatus);
         if (tConfig.examSchedule.lateToleranceMinutes !== undefined) setLateTolerance(tConfig.examSchedule.lateToleranceMinutes);
         if (tConfig.examSchedule.allowReviewAfterFinish !== undefined) setAllowReviewAfterFinish(tConfig.examSchedule.allowReviewAfterFinish);
@@ -660,6 +680,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (config.examSchedule) {
         setScheduleStartTime(config.examSchedule.startTime || '');
         setScheduleEndTime(config.examSchedule.endTime || '');
+        setEnforceScheduleEndTime(config.examSchedule.enforceScheduleEndTime === true);
         setSessionStatus(config.examSchedule.sessionStatus || 'ACTIVE');
         setLateTolerance(config.examSchedule.lateToleranceMinutes || 15);
         setAllowReviewAfterFinish(config.examSchedule.allowReviewAfterFinish !== false);
@@ -1229,6 +1250,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       examSchedule: {
         startTime: scheduleStartTime,
         endTime: scheduleEndTime,
+        enforceScheduleEndTime,
         sessionStatus,
         lateToleranceMinutes: lateTolerance,
         allowReviewAfterFinish,
@@ -1259,6 +1281,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       teacherConfigs: updatedTeacherConfigs,
     });
     showAlert(`Semua Pengaturan Jadwal, Durasi, KKM, Token & Ketentuan Ujian untuk Akun Guru "${activeTeacher?.nama || targetKg}" Berhasil Disimpan!`);
+  };
+
+  // Handler untuk membersihkan / membebaskan seluruh batas tanggal & jam ujian untuk SEMUA guru & mapel
+  const handleResetAllScheduleDeadlines = () => {
+    showConfirm(
+      'Kosongkan Seluruh Batas Waktu Ujian?',
+      'Tindakan ini akan mengosongkan seluruh tanggal dan jam selesai ujian untuk SEMUA akun guru dan konfigurasi ujian.\n\nSiswa akan bebas mengerjakan ujian kapan saja dengan batas waktu berbasis durasi normal (misal 60 menit) tanpa terpental atau terkunci otomatis.\n\nApakah Anda yakin?',
+      () => {
+        setScheduleStartTime('');
+        setScheduleEndTime('');
+        setEnforceScheduleEndTime(false);
+
+        const cleanedTeacherConfigs: Record<string, TeacherConfigOverride> = {};
+        if (config.teacherConfigs) {
+          Object.keys(config.teacherConfigs).forEach((kg) => {
+            const tc = config.teacherConfigs?.[kg];
+            if (tc) {
+              cleanedTeacherConfigs[kg] = {
+                ...tc,
+                examSchedule: tc.examSchedule
+                  ? {
+                      ...tc.examSchedule,
+                      startTime: '',
+                      endTime: '',
+                      enforceScheduleEndTime: false,
+                    }
+                  : undefined,
+              };
+            }
+          });
+        }
+
+        const updatedConfig: AppConfig = {
+          ...config,
+          examSchedule: {
+            ...(config.examSchedule || {}),
+            startTime: '',
+            endTime: '',
+            enforceScheduleEndTime: false,
+          },
+          teacherConfigs: cleanedTeacherConfigs,
+          updatedAt: new Date().toISOString(),
+        };
+
+        onSaveConfig(updatedConfig);
+        showAlert('✅ Sukses! Seluruh batas tanggal/jam selesai ujian SEMUA guru telah dikosongkan. Siswa dapat mengerjakan ujian normal.');
+      },
+      false
+    );
   };
 
   // Real-time Broadcast Warning Handler (Point 2)
@@ -3042,10 +3113,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       qBentuk.includes(query) ||
       qMapel.includes(query);
 
-    const matchesMapel =
-      selectedBankMapel === 'ALL' ||
-      !q.mapel ||
-      q.mapel === selectedBankMapel;
+    const teacherMapel = loggedInTeacher?.mapel ? loggedInTeacher.mapel.trim().toLowerCase() : null;
+    const matchesMapel = teacherMapel
+      ? (q.mapel || '').trim().toLowerCase() === teacherMapel
+      : (selectedBankMapel === 'ALL' || !q.mapel || q.mapel === selectedBankMapel);
 
     const matchesKompetensi =
       selectedBankKompetensi === 'ALL' ||
@@ -4972,41 +5043,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
 
+                {loggedInTeacher && (
+                  <div className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="font-bold block">Profil Guru Aktif: {loggedInTeacher.nama} ({loggedInTeacher.kodeGuru})</span>
+                        <span className="text-emerald-700 text-[11px]">Mata Pelajaran Anda wajib terkunci pada <b>{loggedInTeacher.mapel}</b> dan tidak menggunakan mata pelajaran ujian aktif sekolah.</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-emerald-200/80 text-emerald-900 font-bold px-2.5 py-1 rounded-md font-mono shrink-0">
+                      Mapel: {loggedInTeacher.mapel}
+                    </span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Form Inputs */}
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                        Pilih Mata Pelajaran
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5 flex items-center justify-between">
+                        <span>Pilih Mata Pelajaran</span>
+                        {loggedInTeacher?.mapel && (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                            Terkunci Profil Anda
+                          </span>
+                        )}
                       </label>
                       <select
                         value={mapelInput}
+                        disabled={Boolean(loggedInTeacher?.mapel)}
                         onChange={(e) => {
                           const val = e.target.value;
                           setMapelInput(val);
                           setMapelTitleInput(`Assessment TKA ${val} SMA`);
                         }}
-                        className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl px-3.5 py-2.5 font-bold focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                        className={`w-full text-slate-800 text-sm rounded-xl px-3.5 py-2.5 font-bold focus:ring-2 focus:ring-sky-500 focus:outline-none ${
+                          loggedInTeacher?.mapel
+                            ? 'bg-emerald-50/60 border border-emerald-300 text-emerald-950 cursor-not-allowed'
+                            : 'bg-slate-50 border border-slate-300 cursor-pointer'
+                        }`}
                       >
-                        {mapelList.map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                        ))}
+                        {loggedInTeacher?.mapel ? (
+                          <option value={loggedInTeacher.mapel}>{loggedInTeacher.mapel} (Mata Pelajaran Anda)</option>
+                        ) : (
+                          mapelList.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5 flex items-center justify-between">
                         <span>Kode Guru Pengampu (Penanda Multi-Guru)</span>
-                        <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-black">Wajib Unik</span>
+                        <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-black">
+                          {loggedInTeacher ? 'Akun Anda' : 'Wajib Unik'}
+                        </span>
                       </label>
                       <input
                         type="text"
                         value={kodeGuruInput}
+                        disabled={Boolean(loggedInTeacher?.kodeGuru)}
                         onChange={(e) => setKodeGuruInput(e.target.value.toUpperCase())}
                         placeholder="Contoh: GURU01 / SOS01 / MTH02"
-                        className="w-full bg-slate-50 border border-slate-300 text-amber-900 text-sm rounded-xl px-3.5 py-2.5 font-mono font-black focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        className={`w-full text-amber-900 text-sm rounded-xl px-3.5 py-2.5 font-mono font-black focus:ring-2 focus:ring-amber-500 focus:outline-none ${
+                          loggedInTeacher?.kodeGuru
+                            ? 'bg-amber-50/60 border border-amber-300 cursor-not-allowed'
+                            : 'bg-slate-50 border border-slate-300'
+                        }`}
                       />
                       <p className="text-[11px] text-slate-400 mt-1">
                         Kode unik guru pengampu agar bank soal dan siswa tidak tertukar dengan guru lain.
@@ -5866,26 +5973,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
                 {/* 1. Filter Mata Pelajaran */}
                 <div className="flex flex-col gap-1">
-                  <label className="font-bold text-slate-700 text-[10px] uppercase tracking-wider flex items-center gap-1">
-                    <BookOpen className="w-3.5 h-3.5 text-sky-600" /> Mata Pelajaran:
+                  <label className="font-bold text-slate-700 text-[10px] uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <BookOpen className="w-3.5 h-3.5 text-sky-600" /> Mata Pelajaran:
+                    </span>
+                    {loggedInTeacher?.mapel && (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
+                        Terkunci Guru
+                      </span>
+                    )}
                   </label>
-                  <select
-                    value={selectedBankMapel}
-                    onChange={(e) => setSelectedBankMapel(e.target.value)}
-                    className="bg-white border border-slate-300 text-slate-800 font-bold text-xs rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-sky-500 focus:outline-none cursor-pointer"
-                  >
-                    <option value="ALL">Semua Mapel ({config.questions.length})</option>
-                    {mapelList.map((m) => {
-                      const count = config.questions.filter(
-                        (q) => q.mapel === m || (!q.mapel && m === (config.mapel || 'Sosiologi'))
-                      ).length;
-                      return (
-                        <option key={m} value={m}>
-                          {m} ({count})
-                        </option>
-                      );
-                    })}
-                  </select>
+                  {loggedInTeacher?.mapel ? (
+                    <div className="bg-emerald-50/80 border border-emerald-300 text-emerald-950 font-bold text-xs rounded-xl px-2.5 py-1.5 flex items-center justify-between shadow-2xs">
+                      <span>{loggedInTeacher.mapel}</span>
+                      <span className="text-[10px] text-emerald-800 bg-white px-1.5 py-0.5 rounded font-mono font-black border border-emerald-200">
+                        {config.questions.filter((q) => (q.mapel || '').trim().toLowerCase() === loggedInTeacher.mapel.trim().toLowerCase()).length} Soal
+                      </span>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedBankMapel}
+                      onChange={(e) => setSelectedBankMapel(e.target.value)}
+                      className="bg-white border border-slate-300 text-slate-800 font-bold text-xs rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-sky-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="ALL">Semua Mapel ({config.questions.length})</option>
+                      {mapelList.map((m) => {
+                        const count = config.questions.filter(
+                          (q) => q.mapel === m || (!q.mapel && m === (config.mapel || 'Sosiologi'))
+                        ).length;
+                        return (
+                          <option key={m} value={m}>
+                            {m} ({count})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  )}
                 </div>
 
                 {/* 2. Filter Kompetensi / KD */}
@@ -5938,25 +6061,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                 {/* 4. Filter Kode Guru */}
                 <div className="flex flex-col gap-1">
-                  <label className="font-bold text-slate-700 text-[10px] uppercase tracking-wider flex items-center gap-1">
-                    <GraduationCap className="w-3.5 h-3.5 text-emerald-600" /> Kode Guru:
+                  <label className="font-bold text-slate-700 text-[10px] uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <GraduationCap className="w-3.5 h-3.5 text-emerald-600" /> Kode Guru:
+                    </span>
+                    {loggedInTeacher?.kodeGuru && (
+                      <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.2 rounded">
+                        Akun Anda
+                      </span>
+                    )}
                   </label>
-                  <select
-                    value={selectedBankKodeGuru}
-                    onChange={(e) => setSelectedBankKodeGuru(e.target.value)}
-                    className="bg-white border border-emerald-300 text-emerald-950 font-mono font-bold text-xs rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
-                  >
-                    <option value="ALL">Semua Kode Guru</option>
-                    {availableKodeGurus.map((kg) => (
-                      <option key={kg} value={kg}>
-                        {kg}
-                      </option>
-                    ))}
-                  </select>
+                  {loggedInTeacher?.kodeGuru ? (
+                    <div className="bg-amber-50/80 border border-amber-300 text-amber-950 font-mono font-bold text-xs rounded-xl px-2.5 py-1.5 flex items-center justify-between shadow-2xs">
+                      <span>{loggedInTeacher.kodeGuru}</span>
+                      <span className="text-[10px] text-amber-900 bg-white px-1.5 py-0.5 rounded font-sans font-bold border border-amber-200">
+                        {loggedInTeacher.nama}
+                      </span>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedBankKodeGuru}
+                      onChange={(e) => setSelectedBankKodeGuru(e.target.value)}
+                      className="bg-white border border-emerald-300 text-emerald-950 font-mono font-bold text-xs rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="ALL">Semua Kode Guru</option>
+                      {availableKodeGurus.map((kg) => (
+                        <option key={kg} value={kg}>
+                          {kg}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 
-              {selectedBankMapel !== 'ALL' && selectedBankMapel !== config.mapel && (
+              {!loggedInTeacher && selectedBankMapel !== 'ALL' && selectedBankMapel !== config.mapel && (
                 <div className="pt-2 border-t border-slate-200/80 flex justify-end">
                   <button
                     onClick={() => {
@@ -7441,9 +7580,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Detail Tanggal & Jam Pelaksanaan */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5 flex items-center gap-1.5">
-                    <Calendar className="w-4 h-4 text-orange-600" /> Tanggal & Waktu Mulai Ujian
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-orange-600" /> Tanggal & Waktu Mulai Ujian
+                    </label>
+                    {scheduleStartTime && (
+                      <button
+                        type="button"
+                        onClick={() => setScheduleStartTime('')}
+                        className="text-[11px] text-red-600 hover:text-red-700 font-bold underline cursor-pointer"
+                        title="Kosongkan jadwal mulai"
+                      >
+                        ✕ Kosongkan
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="datetime-local"
                     value={scheduleStartTime}
@@ -7454,17 +7605,81 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5 flex items-center gap-1.5">
-                    <Calendar className="w-4 h-4 text-orange-600" /> Tanggal & Waktu Selesai Ujian
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-orange-600" /> Tanggal & Waktu Selesai Ujian
+                    </label>
+                    {scheduleEndTime && (
+                      <button
+                        type="button"
+                        onClick={() => setScheduleEndTime('')}
+                        className="text-[11px] text-red-600 hover:text-red-700 font-bold underline cursor-pointer"
+                        title="Kosongkan batas jam selesai agar siswa bebas mengerjakan kapan saja"
+                      >
+                        ✕ Kosongkan Batas Jam
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="datetime-local"
                     value={scheduleEndTime}
                     onChange={(e) => setScheduleEndTime(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl p-3 font-semibold focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    className={`w-full bg-slate-50 border ${
+                      scheduleEndTime && !isNaN(new Date(scheduleEndTime).getTime()) && Date.now() >= new Date(scheduleEndTime).getTime() && enforceScheduleEndTime
+                        ? 'border-red-500 bg-red-50/60 text-red-900 ring-2 ring-red-400'
+                        : 'border-slate-300 text-slate-800'
+                    } text-sm rounded-xl p-3 font-semibold focus:ring-2 focus:ring-orange-500 focus:outline-none`}
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">Siswa tidak dapat memulai ujian jika melebihi waktu ini</p>
+                  {scheduleEndTime && !isNaN(new Date(scheduleEndTime).getTime()) && Date.now() >= new Date(scheduleEndTime).getTime() ? (
+                    <div className="p-2.5 mt-2 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-[11px] font-semibold flex items-start gap-2 shadow-xs">
+                      <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="block font-bold text-amber-950">
+                          Catatan: Tanggal/Jam Selesai Ini ({new Date(scheduleEndTime).toLocaleString('id-ID')}) Sudah Terlewat.
+                        </span>
+                        <span>
+                          {enforceScheduleEndTime
+                            ? '⚠️ Opsi Kunci Batas Jam Ketat aktif: Peserta ujian akan otomatis ditutup. Klik "✕ Kosongkan Batas Jam" atau hapus centang Kunci Batas Jam di bawah jika ingin siswa tetap bisa ujian!'
+                            : 'Karena "Kunci Batas Jam Ketat" TIDAK dicentang, siswa tetap dapat mengerjakan ujian dengan tenang sesuai durasi normal tanpa terpental.'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Kosongkan jika ingin ujian bebas batas jam selesai (hanya dihitung berdasarkan durasi pengerjaan).
+                    </p>
+                  )}
                 </div>
+              </div>
+
+              {/* Toggle Kunci Batas Jam Ketat & Tombol Kosongkan Semua Jadwal */}
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="enforceScheduleEndTimeCheckbox"
+                    checked={enforceScheduleEndTime}
+                    onChange={(e) => setEnforceScheduleEndTime(e.target.checked)}
+                    className="mt-1 w-4 h-4 text-orange-600 rounded cursor-pointer accent-orange-600"
+                  />
+                  <label htmlFor="enforceScheduleEndTimeCheckbox" className="text-xs text-slate-700 cursor-pointer select-none">
+                    <span className="font-bold block text-slate-800">
+                      Aktifkan Kunci Batas Jam Ketat (Paksa Auto-Submit saat Jam Selesai Terlewati)
+                    </span>
+                    <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                      Direkomendasikan <b>TIDAK DICENTANG</b>. Jika tidak dicentang, siswa TIDAK akan terpental meskipun tanggal/jam telah lewat, dan ujian tetap dibatasi aman oleh Durasi Pengerjaan reguler.
+                    </span>
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleResetAllScheduleDeadlines}
+                  className="shrink-0 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 hover:border-red-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95"
+                  title="Klik untuk menghapus semua tanggal/jam selesai ujian pada konfigurasi dan seluruh akun guru"
+                >
+                  <Trash2 className="w-4 h-4 text-red-600" /> Kosongkan Batas Jam Semua Guru
+                </button>
               </div>
 
               {/* Durasi, KKM & Toleransi Keterlambatan */}

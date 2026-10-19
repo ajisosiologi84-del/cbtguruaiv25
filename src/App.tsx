@@ -193,9 +193,20 @@ export default function App() {
         if (parsed && Array.isArray(parsed.questions)) {
           // Permanently strip any persistent legacy default questions
           const cleanedQuestions = parsed.questions.filter((q: Question) => !isLegacyDefaultQuestion(q));
+          const rawExamSchedule = parsed.examSchedule || {};
+          const isEnforced = rawExamSchedule.enforceScheduleEndTime === true;
+          const isEndTimePassed = rawExamSchedule.endTime && !isNaN(new Date(rawExamSchedule.endTime).getTime()) && Date.now() >= new Date(rawExamSchedule.endTime).getTime();
+          // If end time is past and not strictly enforced, clear the stale endTime string
+          const safeExamSchedule = {
+            ...rawExamSchedule,
+            endTime: (!isEnforced && isEndTimePassed) ? '' : (rawExamSchedule.endTime || ''),
+            enforceScheduleEndTime: isEnforced,
+          };
+
           return {
             ...parsed,
             questions: cleanedQuestions,
+            examSchedule: safeExamSchedule,
             googleSheetsWebhookUrl: parsed.googleSheetsWebhookUrl || initialGasUrl || undefined,
             kodeGuru: parsed.kodeGuru || 'GURU01',
             examToken: parsed.examToken || 'SOS2026',
@@ -932,8 +943,8 @@ export default function App() {
     const effectiveExamSchedule = teacherConfig?.examSchedule ?? config.examSchedule;
 
     const timer = setInterval(() => {
-      // Check if schedule end time is reached
-      if (effectiveExamSchedule?.endTime) {
+      // Check if schedule end time is reached - ONLY if teacher/admin strictly enforced it
+      if (effectiveExamSchedule?.enforceScheduleEndTime === true && effectiveExamSchedule?.endTime) {
         const endTimeMs = new Date(effectiveExamSchedule.endTime).getTime();
         if (!isNaN(endTimeMs) && Date.now() >= endTimeMs) {
           clearInterval(timer);
@@ -953,7 +964,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [viewState, config.examSchedule?.endTime]);
+  }, [viewState, config.examSchedule?.endTime, config.examSchedule?.enforceScheduleEndTime, studentInfo.kodeGuru, config.teacherConfigs]);
 
   // Real-time Exam Session Control (Point 1 - Opsi A) & Broadcast Warning Listener (Point 2)
   useEffect(() => {
@@ -1360,11 +1371,11 @@ export default function App() {
           image: qData.image,
           images: qData.images,
           imagePosition: qData.imagePosition,
-          mapel: qData.mapel || updatedQuestions[idx].mapel || config.mapel || 'Sosiologi',
+          mapel: loggedInTeacher?.mapel || qData.mapel || updatedQuestions[idx].mapel || config.mapel || 'Sosiologi',
           kompetensi: qData.kompetensi || qData.subTopik,
           subTopik: qData.subTopik || qData.kompetensi,
           bentukSoal: qData.bentukSoal || updatedQuestions[idx].bentukSoal || 'Pilihan Ganda',
-          kodeGuru: qData.kodeGuru || updatedQuestions[idx].kodeGuru || activeKodeGuru,
+          kodeGuru: loggedInTeacher?.kodeGuru || qData.kodeGuru || updatedQuestions[idx].kodeGuru || activeKodeGuru,
           categoryOptions: qData.categoryOptions,
           categoryStatements: qData.categoryStatements,
           poin: typeof qData.poin === 'number' && qData.poin > 0 ? qData.poin : updatedQuestions[idx].poin || 10,
@@ -1383,11 +1394,11 @@ export default function App() {
         image: qData.image,
         images: qData.images,
         imagePosition: qData.imagePosition,
-        mapel: qData.mapel || config.mapel || 'Sosiologi',
+        mapel: loggedInTeacher?.mapel || qData.mapel || config.mapel || 'Sosiologi',
         kompetensi: qData.kompetensi || qData.subTopik,
         subTopik: qData.subTopik || qData.kompetensi,
         bentukSoal: qData.bentukSoal || 'Pilihan Ganda',
-        kodeGuru: qData.kodeGuru || activeKodeGuru,
+        kodeGuru: loggedInTeacher?.kodeGuru || qData.kodeGuru || activeKodeGuru,
         categoryOptions: qData.categoryOptions,
         categoryStatements: qData.categoryStatements,
         poin: typeof qData.poin === 'number' && qData.poin > 0 ? qData.poin : 10,
@@ -1432,6 +1443,9 @@ export default function App() {
             setLoggedInTeacher(teacherDetails || null);
             if (role === 'teacher' && teacherDetails?.kodeGuru) {
               const teacherKey = `cbt_teacher_${teacherDetails.kodeGuru.toUpperCase()}_${(teacherDetails.mapel || '').trim().toLowerCase()}`;
+              const tMapelLower = (teacherDetails.mapel || '').trim().toLowerCase();
+              const tKgUpper = teacherDetails.kodeGuru.trim().toUpperCase();
+
               getItemIDB<Question[]>(teacherKey).then((savedTeacherQuestions) => {
                 if (Array.isArray(savedTeacherQuestions) && savedTeacherQuestions.length > 0) {
                   setConfig((prev) => ({
@@ -1440,8 +1454,29 @@ export default function App() {
                     mapel: teacherDetails.mapel || prev.mapel,
                     kodeGuru: teacherDetails.kodeGuru,
                   }));
+                } else {
+                  // Jika belum ada di IDB, saring bank soal agar guru hanya berada pada mata pelajarannya
+                  setConfig((prev) => {
+                    const filteredMatching = (prev.questions || []).filter((q) => {
+                      const qM = (q.mapel || '').trim().toLowerCase();
+                      const qK = (q.kodeGuru || '').trim().toUpperCase();
+                      return (!qM || qM === tMapelLower) && (!qK || qK === tKgUpper);
+                    });
+                    return {
+                      ...prev,
+                      questions: filteredMatching,
+                      mapel: teacherDetails.mapel || prev.mapel,
+                      kodeGuru: teacherDetails.kodeGuru,
+                    };
+                  });
                 }
-              }).catch(() => {});
+              }).catch(() => {
+                setConfig((prev) => ({
+                  ...prev,
+                  mapel: teacherDetails.mapel || prev.mapel,
+                  kodeGuru: teacherDetails.kodeGuru,
+                }));
+              });
             }
             setViewState('admin');
           }}

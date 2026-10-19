@@ -114,6 +114,7 @@ export interface BroadcastAlert {
 export interface ExamScheduleConfig {
   startTime?: string; // e.g. "2026-07-29T08:00"
   endTime?: string; // e.g. "2026-07-29T12:00"
+  enforceScheduleEndTime?: boolean; // Default false. Hanya jika true sistem akan memaksa ujian auto-submit saat jam selesai terlewati
   sessionStatus?: 'DRAFT' | 'ACTIVE' | 'CLOSED' | 'FORCE_STOPPED';
   lateToleranceMinutes?: number;
   allowReviewAfterFinish?: boolean;

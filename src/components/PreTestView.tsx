@@ -44,10 +44,23 @@ export const PreTestView: React.FC<PreTestViewProps> = ({
   const effectiveDuration = teacherConfig?.duration ?? config.duration;
   const effectiveKkm = teacherConfig?.kkm ?? config.kkm;
 
+  const isScheduleExpired = Boolean(
+    effectiveSchedule?.enforceScheduleEndTime === true &&
+    effectiveSchedule?.endTime &&
+    !isNaN(new Date(effectiveSchedule.endTime).getTime()) &&
+    Date.now() >= new Date(effectiveSchedule.endTime).getTime()
+  );
+
+  const isScheduleNotStarted = Boolean(
+    effectiveSchedule?.startTime &&
+    !isNaN(new Date(effectiveSchedule.startTime).getTime()) &&
+    Date.now() < new Date(effectiveSchedule.startTime).getTime()
+  );
+
   const isLimitReached = studentAttemptsCount >= maxAttempts;
   const isSessionClosed = sessionStatus === 'CLOSED';
   const isSessionDraft = sessionStatus === 'DRAFT';
-  const isStartDisabled = isLimitReached || isSessionClosed || isSessionDraft;
+  const isStartDisabled = isLimitReached || isSessionClosed || isSessionDraft || isScheduleExpired || isScheduleNotStarted;
 
   const executeStartExam = async () => {
     // Directly request fullscreen on user click
@@ -56,7 +69,7 @@ export const PreTestView: React.FC<PreTestViewProps> = ({
   };
 
   const handleStartButtonClick = () => {
-    if (isLimitReached || isSessionClosed || isSessionDraft) return;
+    if (isStartDisabled) return;
 
     // Hanya tampilkan modal peringatan offline jika Guru/Pengawas secara khusus mengaktifkan opsi Wajib Mode Offline
     if (effectiveSchedule?.requireOfflineMode && navigator.onLine) {
@@ -126,7 +139,29 @@ export const PreTestView: React.FC<PreTestViewProps> = ({
             </div>
           )}
 
-          {isLimitReached && !isSessionClosed && !isSessionDraft && (
+          {isScheduleExpired && !isSessionClosed && !isSessionDraft && (
+            <div className="bg-red-50 border-2 border-red-400 rounded-2xl p-4 sm:p-5 mb-6 text-red-950 animate-pulse shadow-xs">
+              <div className="flex items-center gap-2 font-black text-sm sm:text-base mb-1 text-red-900">
+                <Clock className="w-5 h-5 text-red-600 shrink-0" /> Batas Jam Selesai Ujian Telah Berakhir
+              </div>
+              <p className="text-xs sm:text-sm leading-relaxed font-semibold text-red-800">
+                Batas waktu ujian yang ditentukan ({new Date(effectiveSchedule!.endTime!).toLocaleString('id-ID')}) telah lewat. Silakan hubungi Guru Pengawas / Proktor untuk memperbarui atau mengosongkan batas waktu ujian pada Panel Guru jika ujian ingin dilanjutkan.
+              </p>
+            </div>
+          )}
+
+          {isScheduleNotStarted && !isSessionClosed && !isSessionDraft && !isScheduleExpired && (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 mb-6 text-amber-950 shadow-xs">
+              <div className="flex items-center gap-2 font-black text-sm sm:text-base mb-1 text-amber-900">
+                <Clock className="w-5 h-5 text-amber-600 shrink-0" /> Jadwal Ujian Belum Dimulai
+              </div>
+              <p className="text-xs sm:text-sm leading-relaxed font-semibold text-amber-800">
+                Jadwal mulai ujian adalah pada {new Date(effectiveSchedule!.startTime!).toLocaleString('id-ID')}. Tombol pengerjaan akan aktif saat waktu ujian dimulai.
+              </p>
+            </div>
+          )}
+
+          {isLimitReached && !isSessionClosed && !isSessionDraft && !isScheduleExpired && (
             <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 sm:p-5 mb-6 text-red-900 animate-pulse">
               <div className="flex items-center gap-2 font-black text-sm sm:text-base mb-1">
                 <ShieldAlert className="w-5 h-5 text-red-600 shrink-0" /> Batas Maksimal Ujian Tercapai
@@ -273,6 +308,10 @@ export const PreTestView: React.FC<PreTestViewProps> = ({
                 ? 'Sesi Ujian DRAFT (Belum Dibuka)'
                 : isSessionClosed
                 ? 'Sesi Ujian CLOSED (Ditutup)'
+                : isScheduleExpired
+                ? '⏰ Jadwal Selesai Telah Berakhir'
+                : isScheduleNotStarted
+                ? '⏳ Belum Waktunya Ujian'
                 : isLimitReached
                 ? 'Batas Ujian Tercapai'
                 : hasSavedSession
