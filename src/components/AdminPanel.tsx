@@ -7730,9 +7730,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Jumlah Soal Tampil & Percobaan (Max Attempts) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                    Jumlah Soal Dikeluarkan Per Siswa
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Jumlah Soal Dikeluarkan Per Siswa
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setMaxQuestionsInput(0)}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-700 underline cursor-pointer"
+                      title="Keluarkan seluruh soal aktif tanpa batasan"
+                    >
+                      Tampilkan Semua Soal (0)
+                    </button>
+                  </div>
                   <input
                     type="number"
                     min={0}
@@ -7741,9 +7751,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     placeholder="0 = Gunakan Semua Soal Aktif"
                     className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl p-3 font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Isi <b>0</b> untuk mengeluarkan semua soal aktif.
-                  </p>
+                  <div className="mt-1 flex items-center justify-between text-[10px]">
+                    <span className="text-slate-500">
+                      Isi <b>0</b> agar seluruh <b>{config.questions.filter((q) => q.isActive !== false).length} soal aktif</b> disajikan ke siswa.
+                    </span>
+                    {maxQuestionsInput > 0 && maxQuestionsInput < config.questions.filter((q) => q.isActive !== false).length && (
+                      <span className="text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-md">
+                        ⚠️ Terbatas {maxQuestionsInput} Soal
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div>

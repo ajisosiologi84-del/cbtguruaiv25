@@ -842,21 +842,15 @@ export default function App() {
       return true;
     });
 
-    // If matching package schedule specifies explicit question IDs or package variations
+    // If matching package schedule specifies explicit question IDs
     if (matchedToken?.soalIds && matchedToken.soalIds.length > 0) {
       const packageScoped = activePool.filter((q) => matchedToken.soalIds?.includes(q.id));
       if (packageScoped.length > 0) {
         activePool = packageScoped;
       }
-    } else if (matchedToken?.kodePaket?.includes('-B') || matchedToken?.paketSoal?.toLowerCase().includes('paket b')) {
-      const ganjil = activePool.filter((_, idx) => idx % 2 === 1);
-      if (ganjil.length > 0) activePool = ganjil;
-    } else if (matchedToken?.kodePaket?.includes('-C') || matchedToken?.paketSoal?.toLowerCase().includes('paket c')) {
-      const genap = activePool.filter((_, idx) => idx % 2 === 0);
-      if (genap.length > 0) activePool = genap;
     }
 
-    // Fallback 1: Jika filter kodeGuru menghasilkan 0 soal, gunakan seluruh soal aktif yang ada di Bank Soal
+    // Fallback 1: Jika filter menghasilkan 0 soal, gunakan seluruh soal aktif yang ada di Bank Soal
     if (activePool.length === 0) {
       activePool = currentQuestions.filter((q) => q.isActive !== false);
     }
@@ -892,7 +886,7 @@ export default function App() {
     const effectiveMaxQuestionsToDisplay = teacherConfig?.maxQuestionsToDisplay ?? config.maxQuestionsToDisplay;
     const effectiveExamSchedule = teacherConfig?.examSchedule ?? config.examSchedule;
 
-    // 1. Prepare active questions pool
+    // 1. Prepare active questions pool (Preserve full 30 questions)
     let pool = [...activePool];
 
     // 2. Randomize questions order if enabled (default true)
@@ -900,7 +894,7 @@ export default function App() {
       pool = shuffleArray<Question>(pool);
     }
 
-    // 3. Limit total questions displayed if maxQuestionsToDisplay > 0
+    // 3. Limit total questions displayed ONLY if maxQuestionsToDisplay > 0 and < pool.length
     const maxQ = Number(effectiveMaxQuestionsToDisplay || 0);
     if (maxQ > 0 && maxQ < pool.length) {
       pool = pool.slice(0, maxQ);
@@ -908,13 +902,13 @@ export default function App() {
 
     // 4. Randomize options for each question if enabled (default true)
     const preparedQuestions: Question[] = pool.map((q: Question) => {
-      let opts = [...q.options];
-      if (effectiveRandomizeOptions !== false) {
+      let opts = q.options ? [...q.options] : [];
+      if (effectiveRandomizeOptions !== false && opts.length > 0) {
         opts = shuffleArray<Option>(opts);
       }
       const labels = ['A', 'B', 'C', 'D', 'E'];
       const mappedOpts: Option[] = opts.map((opt: Option, i: number) => ({
-        id: labels[i],
+        id: labels[i] || opt.id || String.fromCharCode(65 + i),
         text: opt.text,
         isCorrect: opt.isCorrect,
         image: opt.image,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Question, BroadcastAlert } from '../types';
 import { formatQuestionText, renderMathInText } from '../utils/questionFormatter';
-import { BookOpen, Clock, Flag, ChevronLeft, ChevronRight, Brain, Grid, X, CheckCircle2, ShieldAlert, Lock, Megaphone, Bell, AlertTriangle, ArrowLeft, Home, Layers, ListChecks, Maximize2, Split, ShieldCheck, ZoomIn, ZoomOut, RotateCcw, Type } from 'lucide-react';
+import { BookOpen, Clock, Flag, ChevronLeft, ChevronRight, Brain, Grid, X, CheckCircle2, ShieldAlert, Lock, Megaphone, Bell, AlertTriangle, ArrowLeft, Home, Layers, ListChecks, Maximize2, Split, ShieldCheck, ZoomIn, ZoomOut, RotateCcw, Type, Edit3 } from 'lucide-react';
 import { requestAppFullscreen, isAppFullscreen, checkSplitScreenViolation, clearClipboard, isIOSDevice, isIOSStandalone } from '../utils/antiCheating';
 
 interface TestViewProps {
@@ -830,7 +830,7 @@ export const TestView: React.FC<TestViewProps> = ({
                       <span>Pilihan Ganda Kompleks MCMA (Pilih lebih dari satu opsi jawaban)</span>
                     </div>
 
-                    {currentQuestion.options.map((opt) => {
+                    {(currentQuestion.options || []).map((opt) => {
                       const isSelected = userAnsList.includes(opt.id.toUpperCase());
                       return (
                         <label
@@ -892,10 +892,32 @@ export const TestView: React.FC<TestViewProps> = ({
                 );
               }
 
-              // Case 3: Standard Pilihan Ganda (Single Answer)
+              // Case 3: Written / Essay Answer if no options (Isian Singkat / Uraian)
+              const validOptions = (currentQuestion.options || []).filter((o) => o && (o.text || o.image));
+              if (validOptions.length === 0) {
+                return (
+                  <div className="space-y-3 mb-6 flex-1">
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-xs">
+                      <div className="flex items-center gap-2 text-amber-900 font-bold text-xs sm:text-sm mb-2">
+                        <Edit3 className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Jawaban Siswa ({currentQuestion.bentukSoal || 'Isian / Uraian'}):</span>
+                      </div>
+                      <textarea
+                        value={currentAnswer || ''}
+                        onChange={(e) => onAnswer(e.target.value)}
+                        placeholder="Tuliskan jawaban Anda di sini secara lengkap..."
+                        rows={5}
+                        className="w-full p-4 border border-slate-300 rounded-xl text-slate-800 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium"
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
+              // Case 4: Standard Pilihan Ganda (Single Answer)
               return (
                 <div className="space-y-2.5 sm:space-y-3 mb-6 flex-1">
-                  {currentQuestion.options.map((opt) => {
+                  {validOptions.map((opt) => {
                     const isSelected = currentAnswer === opt.id;
                     return (
                       <label

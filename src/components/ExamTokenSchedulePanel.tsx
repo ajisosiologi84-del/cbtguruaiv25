@@ -157,18 +157,6 @@ export const ExamTokenSchedulePanel: React.FC<ExamTokenSchedulePanelProps> = ({
       if (selected.length > 0) return selected;
     }
 
-    if (item.kodePaket.includes('-B') || item.paketSoal.toLowerCase().includes('paket b')) {
-      // Paket B: Soal Index Ganjil
-      const ganjil = activeQuestions.filter((_, idx) => idx % 2 === 1);
-      return ganjil.length > 0 ? ganjil : activeQuestions;
-    }
-
-    if (item.kodePaket.includes('-C') || item.paketSoal.toLowerCase().includes('paket c')) {
-      // Paket C: Soal Index Genap
-      const genap = activeQuestions.filter((_, idx) => idx % 2 === 0);
-      return genap.length > 0 ? genap : activeQuestions;
-    }
-
     return activeQuestions;
   };
 
